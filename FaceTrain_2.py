@@ -1,39 +1,67 @@
 import os
+import re
 import cv2
 import numpy as np
 
-# โฟลเดอร์ที่เก็บรูปภาพ
-DATASET_DIR = "ML_Data_Morning"
+# ===== ตั้งค่า =====
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))   # โฟลเดอร์ที่ไฟล์นี้อยู่
+DATASET_DIR = os.path.join(BASE_DIR, "dataset")
+MODEL_PATH = os.path.join(BASE_DIR, "knn_model.npz")
+IMG_SIZE = (140, 180)        # (กว้าง, สูง) ให้เท่ากับกรอบในกล้อง 250-390 x 120-300
+VALID_EXT = (".jpg", ".jpeg", ".png", ".bmp", ".webp", ".jfif")
 
-X_train, y_train = [], []
 
-print("กำลังอ่านรูปภาพจากโฟลเดอร์...")
+def preprocess(gray):
+    """ขั้นตอนเดียวกับตอนทำนาย: resize -> ปรับแสงให้เท่ากัน"""
+    return cv2.equalizeHist(cv2.resize(gray, IMG_SIZE))
 
-if os.path.exists(DATASET_DIR):
-    for filename in os.listdir(DATASET_DIR):
-        # รองรับไฟล์ .jpg, .jpeg, .png (ตัวพิมพ์เล็ก/ใหญ่)
-        if filename.lower().endswith((".jpg", ".jpeg", ".png")):
-            img_path = os.path.join(DATASET_DIR, filename)
-            x = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
 
-            if x is not None:
-                X_train.append(x.flatten())
+def main():
+    if not os.path.isdir(DATASET_DIR):
+        print(f"ไม่พบโฟลเดอร์ dataset: {DATASET_DIR}")
+        return
 
-                # แยกชื่อเล่นหลังเครื่องหมาย _ (เช่น "6752300151_Pae.jpg" -> "Pae")
-                name_part = os.path.splitext(filename)[0]
-                if "_" in name_part:
-                    nickname = name_part.split("_")[1].strip()
-                else:
-                    nickname = name_part.strip()
+    print("กำลังอ่านรูปภาพจากโฟลเดอร์...")
 
-                y_train.append(nickname)
+    # รองรับ 2 แบบ:
+    #   dataset/ชื่อ.jpg, dataset/ชื่อ_2.jpg, dataset/ชื่อ (3).jpg  -> ชื่อมาจากชื่อไฟล์
+    #   dataset/ชื่อ/รูป.jpg                                     -> ชื่อมาจากชื่อโฟลเดอร์
+    image_list = []
+    for item in sorted(os.listdir(DATASET_DIR)):
+        item_path = os.path.join(DATASET_DIR, item)
+        if os.path.isdir(item_path):
+            for file in sorted(os.listdir(item_path)):
+                if file.lower().endswith(VALID_EXT):
+                    image_list.append((os.path.join(item_path, file), item))
+        elif item.lower().endswith(VALID_EXT):
+            stem = os.path.splitext(item)[0]
+            label = re.sub(r"[\s_\-]*\(?\d+\)?$", "", stem).strip() or stem
+            image_list.append((item_path, label))
 
-    if len(X_train) > 0:
-        np.savez("knn_model.npz", X=np.array(X_train), y=np.array(y_train))
-        print(
-            f"✅ อ่านรูปสำเร็จทั้งหมด {len(X_train)} รูป! บันทึกไฟล์ 'knn_model.npz' เรียบร้อย"
-        )
-    else:
-        print("❌ ไม่พบไฟล์รูปภาพในโฟลเดอร์")
-else:
-    print(f"❌ ไม่พบโฟลเดอร์ชื่อ '{DATASET_DIR}'")
+    X_train, y_train = [], []
+    for path, label in image_list:
+        data = np.fromfile(path, dtype=np.uint8)            # อ่าน path ภาษาไทย/ช่องว่างได้
+        img = cv2.imdecode(data, cv2.IMREAD_GRAYSCALE)
+        if img is None:
+            print(f"  ข้าม (อ่านไม่ได้): {path}")
+            continue
+        X_train.append(preprocess(img).flatten())
+        y_train.append(label)
+
+    if not X_train:
+        print("ไม่พบรูปภาพสำหรับเทรน")
+        return
+
+    for label in sorted(set(y_train)):
+        print(f"  {label}: {y_train.count(label)} รูป")
+
+    X = np.array(X_train, dtype=np.uint8)
+    y = np.array(y_train)
+    np.savez(MODEL_PATH, X=X, y=y, img_size=np.array(IMG_SIZE))
+
+    print(f"บันทึกโมเดลแล้ว: {MODEL_PATH}")
+    print(f"จำนวนข้อมูล: {X.shape[0]} รูป, ขนาดต่อรูป: {X.shape[1]} ค่า")
+
+
+if __name__ == "__main__":
+    main()
