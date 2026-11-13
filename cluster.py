@@ -1,9 +1,11 @@
+import os
 import cv2
 import numpy as np
 from face_utils import load_dataset
 
 N_PCA = 10                # ย่อ 25,200 พิกเซลเหลือ 10 มิติก่อนจัดกลุ่ม
 K_CHOICES = range(3, 7)   # ลองหลายค่า k แล้วเลือกค่าที่ silhouette สูงสุด
+SAVE_IMAGE = False        # True = บันทึกภาพผลเป็น result_groups.png ไว้ใส่รายงาน (ค่าเริ่มต้นไม่บันทึกไฟล์ใด ๆ)
 
 # ลักษณะที่ใช้อธิบายกลุ่ม: (ถ้าสูงกว่าค่าเฉลี่ยห้อง, ถ้าต่ำกว่า)
 TRAITS = [("ผิวหน้าสว่าง", "ผิวหน้าเข้ม"),
@@ -120,6 +122,11 @@ for g in range(k):
     rows.append(np.hstack([head, avg_card] + [thumb(faces[i], names[i], f"s={sil[i]:.2f}") for i in members]))
 width = max(r.shape[1] for r in rows)
 result = np.vstack([np.pad(r, ((0, 6), (0, width - r.shape[1])), constant_values=255) for r in rows])
+if SAVE_IMAGE:
+    # ใช้ imencode + tofile แทน cv2.imwrite เพื่อให้บันทึกได้แม้ path มีภาษาไทย (Windows)
+    out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "result_groups.png")
+    cv2.imencode(".png", result)[1].tofile(out)
+    print(f"\nบันทึกภาพผลที่ {out}")
 cv2.imshow("K-means face groups (press any key to close)", result)
 cv2.waitKey(0)
 cv2.destroyAllWindows()
