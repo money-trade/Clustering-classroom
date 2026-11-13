@@ -1,9 +1,11 @@
+import os
 import cv2
 import numpy as np
 from face_utils import load_dataset
 
 N_PCA = 10                # ย่อ 25,200 พิกเซลเหลือ 10 มิติก่อนจัดกลุ่ม
 K_CHOICES = range(3, 7)   # ลองหลายค่า k แล้วเลือกค่าที่ silhouette สูงสุด
+SAVE_IMAGE = False        # True = บันทึกภาพผลเป็น result_groups.png ไว้ใส่รายงาน (ค่าเริ่มต้นไม่บันทึกไฟล์ใด ๆ)
 
 # ลักษณะที่ใช้อธิบายกลุ่ม: (ถ้าสูงกว่าค่าเฉลี่ยห้อง, ถ้าต่ำกว่า)
 TRAITS = [("ผิวหน้าสว่าง", "ผิวหน้าเข้ม"),
@@ -41,8 +43,8 @@ def kmeans(points, k):
     return np.array([order.index(g) for g in groups])
 
 
-def silhouette(points, groups):
-    """-1 ถึง 1 ยิ่งสูง = แต่ละกลุ่มแยกจากกันชัด"""
+def silhouette_each(points, groups):
+    """silhouette ของแต่ละคน -1 ถึง 1: ใกล้ 1 = อยู่ถูกกลุ่มชัดเจน, ติดลบ = ใกล้กลุ่มอื่นมากกว่า"""
     d = np.linalg.norm(points[:, None] - points[None], axis=2)
     s = []
     for i, g in enumerate(groups):
@@ -53,7 +55,12 @@ def silhouette(points, groups):
         a = d[i, same].sum() / (same.sum() - 1)                           # ห่างจากเพื่อนในกลุ่ม
         b = min(d[i, groups == o].mean() for o in set(groups) if o != g)  # ห่างจากกลุ่มอื่นที่ใกล้สุด
         s.append((b - a) / max(a, b))
-    return np.mean(s)
+    return np.array(s)
+
+
+def silhouette(points, groups):
+    """-1 ถึง 1 ยิ่งสูง = แต่ละกลุ่มแยกจากกันชัด"""
+    return silhouette_each(points, groups).mean()
 
 
 # ===== อ่านรูป: 1 คน = 1 หน้า (ถ้ามีหลายรูปใช้หน้าเฉลี่ย) =====
@@ -73,6 +80,7 @@ scores = {k: silhouette(P, kmeans(P, k)) for k in K_CHOICES}
 k = max(scores, key=scores.get)
 print("silhouette:", ", ".join(f"k={kk} {s:.3f}" for kk, s in scores.items()), f"-> ใช้ {k} กลุ่ม")
 groups = kmeans(P, k)
+sil = silhouette_each(P, groups)
 
 # ===== เกณฑ์ของแต่ละกลุ่ม: ค่าเฉลี่ยกลุ่มห่างจากค่าเฉลี่ยห้องกี่ SD (z) =====
 T = np.array([measure_traits(f) for f in faces])
@@ -81,19 +89,25 @@ for g in range(k):
     zg = z[groups == g].mean(axis=0)
     crit = [f"{TRAITS[j][0] if zg[j] > 0 else TRAITS[j][1]} [z={zg[j]:+.2f}]"
             for j in np.argsort(-abs(zg)) if abs(zg[j]) >= 0.5]
-    print(f"\nกลุ่ม {g + 1} ({(groups == g).sum()} คน): "
+    print(f"\nกลุ่ม {g + 1} ({(groups == g).sum()} คน, silhouette {sil[groups == g].mean():.3f}): "
           + ", ".join(n for n, gg in zip(names, groups) if gg == g))
     print("   เกณฑ์: " + (", ".join(crit) or "ไม่ต่างจากค่าเฉลี่ยห้องชัดเจน"))
+
+# คนที่อยู่ก้ำกึ่ง: silhouette ติดลบ = ใกล้กลุ่มอื่นมากกว่ากลุ่มของตัวเอง
+odd = [f"{names[i]} ({sil[i]:+.3f})" for i in np.argsort(sil) if sil[i] < 0]
+print("\nคนที่ใกล้กลุ่มอื่นมากกว่ากลุ่มตัวเอง: " + (", ".join(odd) or "ไม่มี"))
 
 d = np.linalg.norm(P[:, None] - P[None], axis=2) + np.eye(len(P)) * 1e9
 a, b = np.unravel_index(d.argmin(), d.shape)
 print(f"\nคู่ที่หน้าเหมือนกันที่สุดในห้อง: {names[a]} กับ {names[b]}")
 
 # ===== ภาพสรุป: 1 แถว = 1 กลุ่ม (ชื่อกลุ่ม, หน้าเฉลี่ยของกลุ่ม, สมาชิก) =====
-def thumb(img, text):
-    c = np.full((126, 90), 255, np.uint8)
+def thumb(img, text, sub=""):
+    c = np.full((140, 90), 255, np.uint8)
     c[:108, 3:87] = cv2.resize(img, (84, 108))
     cv2.putText(c, text[:12], (3, 121), cv2.FONT_HERSHEY_SIMPLEX, 0.4, 0, 1)
+    if sub:
+        cv2.putText(c, sub, (3, 135), cv2.FONT_HERSHEY_SIMPLEX, 0.35, 90, 1)
     return c
 
 
@@ -101,11 +115,18 @@ rows = []
 for g in range(k):
     members = [i for i in range(len(people)) if groups[i] == g]
     avg = np.mean([faces[i] for i in members], axis=0).astype(np.uint8)
-    head = np.full((126, 100), 255, np.uint8)   # ช่องหน้าสุด: ชื่อกลุ่ม
+    head = np.full((140, 100), 255, np.uint8)   # ช่องหน้าสุด: ชื่อกลุ่ม
     cv2.putText(head, f"Group {g + 1}", (6, 66), cv2.FONT_HERSHEY_SIMPLEX, 0.6, 0, 2)
-    rows.append(np.hstack([head, thumb(avg, "average")] + [thumb(faces[i], names[i]) for i in members]))
+    avg_card = thumb(avg, "average", f"s={sil[members].mean():.2f}")
+    cv2.rectangle(avg_card, (2, 0), (87, 108), 0, 2)   # กรอบให้หน้าเฉลี่ยต่างจากสมาชิก
+    rows.append(np.hstack([head, avg_card] + [thumb(faces[i], names[i], f"s={sil[i]:.2f}") for i in members]))
 width = max(r.shape[1] for r in rows)
 result = np.vstack([np.pad(r, ((0, 6), (0, width - r.shape[1])), constant_values=255) for r in rows])
+if SAVE_IMAGE:
+    # ใช้ imencode + tofile แทน cv2.imwrite เพื่อให้บันทึกได้แม้ path มีภาษาไทย (Windows)
+    out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "result_groups.png")
+    cv2.imencode(".png", result)[1].tofile(out)
+    print(f"\nบันทึกภาพผลที่ {out}")
 cv2.imshow("K-means face groups (press any key to close)", result)
 cv2.waitKey(0)
 cv2.destroyAllWindows()
