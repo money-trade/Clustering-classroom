@@ -8,6 +8,8 @@ if not hasattr(cv2, "CascadeClassifier"):
                       "ให้ติดตั้งเวอร์ชัน 4: pip install -r requirements.txt")
 
 DATASET_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dataset")
+IMG_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}   # นามสกุลที่ cv2 อ่านได้
+ID_DIGITS = 10          # รหัสนักศึกษาต้องมี 10 หลัก
 IMG_SIZE = (140, 180)   # (กว้าง, สูง) ของหน้าที่ตัดแล้ว
 CASCADE = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
 
@@ -43,11 +45,22 @@ def load_dataset():
     ชื่อมาจากชื่อไฟล์ เช่น 6752300046_Taer_2.jpg -> 6752300046_Taer"""
     faces, labels = [], []
     for file in sorted(os.listdir(DATASET_DIR)):
+        ext = os.path.splitext(file)[1].lower()
+        if ext not in IMG_EXT:
+            if ext in (".heif", ".heic"):
+                print(f"  ข้าม (รูป iPhone ต้องแปลงเป็น .jpg ก่อน): {file}")
+            elif not file.startswith(".") and file.lower() != "desktop.ini":
+                print(f"  ข้าม (ไม่ใช่ไฟล์รูป): {file}")
+            continue
         img = cv2.imdecode(np.fromfile(os.path.join(DATASET_DIR, file), np.uint8), cv2.IMREAD_GRAYSCALE)
         face = None if img is None else face_from_photo(img)
         if face is None:
             print(f"  ข้าม (อ่านไม่ได้หรือหาหน้าไม่เจอ): {file}")
             continue
+        label = re.sub(r"[\s_\-]*\(?\d+\)?$", "", os.path.splitext(file)[0])
+        sid = label.split("_", 1)[0]
+        if not (sid.isdigit() and len(sid) == ID_DIGITS):
+            print(f"  เตือน: รหัส '{sid}' ไม่ใช่ตัวเลข {ID_DIGITS} หลัก ตรวจชื่อไฟล์ {file}")
         faces.append(face)
-        labels.append(re.sub(r"[\s_\-]*\(?\d+\)?$", "", os.path.splitext(file)[0]))
+        labels.append(label)
     return faces, labels
