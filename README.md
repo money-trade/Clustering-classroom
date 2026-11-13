@@ -13,14 +13,18 @@
 | `face_utils.py` | อ่านรูปใน `dataset/` หาหน้าแล้วตัดเฉพาะหน้า |
 | `cluster.py` | แบ่งกลุ่มหน้าด้วย PCA + K-means บอกเกณฑ์ของแต่ละกลุ่ม แล้วแสดงภาพผล |
 | `dataset/` | รูปนักเรียน 32 คน คนละ 1 รูป |
+| `requirements.txt` | ไลบรารีที่ต้องติดตั้ง (OpenCV เวอร์ชัน 4 + NumPy) |
 
 ## ติดตั้ง
 
 ทดสอบกับ Python 3.14, OpenCV 4.14, NumPy 2.5
 
 ```bash
-pip install opencv-python numpy
+pip install -r requirements.txt
 ```
+
+> ต้องใช้ **OpenCV เวอร์ชัน 4** (`opencv-python<5`) เพราะ OpenCV 5.0 ถอด `cv2.CascadeClassifier` (Haar Cascade) ออกแล้ว
+> ถ้าติดตั้ง 5.0 ไปแล้ว ให้รัน `pip install "opencv-python<5"`
 
 ## วิธีใช้
 
